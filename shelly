@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+CONFIG_FILE='/etc/musicbackup.conf'
+
+if [[ $EUID -ne 0 ]]; then
+   exec sudo "$0" "$@" 
+fi
+
+source "$CONFIG_FILE"
+
+usage() {
+    echo "Usage: $(basename "$0") {on|off|status}"
+    exit 1
+}
+
+[[ $# -eq 1 ]] || usage
+
+case "$1" in
+    on)
+        curl -fsS \
+            "http://${SHELLY_IP}/rpc/Switch.Set?id=0&on=true"
+        ;;
+
+    off)
+        curl -fsS \
+            "http://${SHELLY_IP}/rpc/Switch.Set?id=0&on=false"
+        ;;
+
+    status)
+        curl -fsS \
+            "http://${SHELLY_IP}/rpc/Switch.GetStatus?id=0"
+        ;;
+
+    *)
+        usage
+        ;;
+esac
+

@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+
+SCREEN_BIN="/opt/sbin/screen"
+
+RED=$'\033[1;31m'
+GREEN=$'\033[1;32m'
+YELLOW=$'\033[1;33m'
+CYAN=$'\033[1;36m'
+RESET=$'\033[0m'
+
+LOGIN_MODE=0
+
+if [[ "${1:-}" == "--login" ]]; then
+    LOGIN_MODE=1
+elif (( $# > 0 )); then
+    printf 'Usage: %s [--login]\n' "$0" >&2
+    exit 1
+fi
+
+# Never offer or perform nested Screen attachment.
+if [[ -n "${STY:-}" ]]; then
+    if (( LOGIN_MODE == 0 )); then
+        printf '%sAlready inside GNU Screen:%s %s%s%s\n' \
+            "$RED" "$RESET" "$CYAN" "$STY" "$RESET"
+    fi
+    exit 0
+fi
+
+if [[ ! -x "$SCREEN_BIN" ]]; then
+    printf '%sGNU Screen not found: %s%s\n' "$RED" "$SCREEN_BIN" "$RESET" >&2
+    exit 127
+fi
+
+mapfile -t SESSIONS < <(
+    "$SCREEN_BIN" -ls 2>/dev/null |
+    awk '/Detached/ {print $1}'
+)
+
+COUNT="${#SESSIONS[@]}"
+
+# At login, remain silent when nothing is available.
+if (( COUNT == 0 )); then
+    if (( LOGIN_MODE == 0 )); then
+        printf '%sNo detached GNU Screen sessions found.%s\n' \
+            "$YELLOW" "$RESET"
+    fi
+    exit 0
+fi
+
+get_title() {
+    local session="$1"
+    local title
+
+    title="$(
+        "$SCREEN_BIN" -S "$session" -Q title 2>/dev/null |
+        head -n 1
+    )"
+
+    [[ -n "$title" ]] || title="$session"
+    printf '%s' "$title"
+}
+
+attach_session() {
+    local session="$1"
+    local title
+
+    title="$(get_title "$session")"
+
+    echo
+    printf '%s****************************************************%s\n' \
+        "$GREEN" "$RESET"
+    printf '%s***  Reconnecting to %s%s%s...%s\n' \
+        "$YELLOW" "$CYAN" "$title" "$YELLOW" "$RESET"
+    printf '%s****************************************************%s\n' \
+        "$GREEN" "$RESET"
+
+    sleep 1
+    exec "$SCREEN_BIN" -r "$session"
+}
+
+if (( COUNT == 1 )); then
+    SESSION="${SESSIONS[0]}"
+    TITLE="$(get_title "$SESSION")"
+
+    echo
+    printf '%s****************************************************%s\n' \
+        "$GREEN" "$RESET"
+    printf '%s***  Detached screen session: %s%s%s\n' \
+        "$YELLOW" "$CYAN" "$TITLE" "$RESET"
+    printf '%s****************************************************%s\n' \
+        "$GREEN" "$RESET"
+    printf '     \033[2;37m%s\033[0m\n\n' "$SESSION"
+
+    read -r -p "Reconnect? [Y/n] " ANSWER
+
+    case "$ANSWER" in
+        ""|Y|y)
+            attach_session "$SESSION"
+            ;;
+        *)
+            exit 0
+            ;;
+    esac
+fi
+
+echo
+printf '%s****************************************************%s\n' \
+    "$GREEN" "$RESET"
+printf '%s***  Detached screen sessions found%s\n' \
+    "$YELLOW" "$RESET"
+printf '%s****************************************************%s\n\n' \
+    "$GREEN" "$RESET"
+
+for i in "${!SESSIONS[@]}"; do
+    SESSION="${SESSIONS[$i]}"
+    TITLE="$(get_title "$SESSION")"
+
+    printf '  %s%d)%s %-20s \033[2;37m(%s)\033[0m\n' \
+        "$YELLOW" "$((i + 1))" "$RESET" \
+        "$TITLE" "$SESSION"
+done
+
+printf '  %s0)%s %sNone — stay in this shell%s\n\n' \
+    "$YELLOW" "$RESET" "$RED" "$RESET"
+
+while true; do
+    read -r -p "Select session [0-${COUNT}]: " CHOICE
+
+    case "$CHOICE" in
+        0)
+            exit 0
+            ;;
+
+        ""|*[!0-9]*)
+            printf '%sPlease enter a number between 0 and %d.%s\n' \
+                "$RED" "$COUNT" "$RESET"
+            ;;
+
+        *)
+            if (( CHOICE >= 1 && CHOICE <= COUNT )); then
+                attach_session "${SESSIONS[$((CHOICE - 1))]}"
+            else
+                printf '%sPlease enter a number between 0 and %d.%s\n' \
+                    "$RED" "$COUNT" "$RESET"
+            fi
+            ;;
+    esac
+done

@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+
+BASHRC="${HOME}/.bashrc"
+
+# Minimum column widths
+MIN_ALIAS_WIDTH=8
+MIN_DESCRIPTION_WIDTH=20
+
+# Extra spacing after longest value
+COLUMN_PADDING=2
+
+RED=$'\033[1;31m'
+GREEN=$'\033[1;32m'
+YELLOW=$'\033[1;33m'
+CYAN=$'\033[1;36m'
+RESET=$'\033[0m'
+
+if [[ ! -r "$BASHRC" ]]; then
+    printf '%sCannot read:%s %s\n' \
+        "$RED" "$RESET" "$BASHRC" >&2
+    exit 1
+fi
+
+declare -a NAMES
+declare -a COMMANDS
+declare -a DESCRIPTIONS
+
+ALIAS_HEADER="Alias"
+DESCRIPTION_HEADER="Description"
+COMMAND_HEADER="Command"
+
+MAX_ALIAS_LENGTH=${#ALIAS_HEADER}
+MAX_DESCRIPTION_LENGTH=${#DESCRIPTION_HEADER}
+
+while IFS= read -r line; do
+    NAME=""
+    COMMAND=""
+    DESCRIPTION=""
+
+    # Single-quoted alias:
+    # alias mb='musicbackup' # Start music backup
+    if [[ $line =~ ^[[:space:]]*alias[[:space:]]+([[:alnum:]_]+)=\'([^\']*)\'[[:space:]]*(#[[:space:]]*:?[[:space:]]*(.*))?[[:space:]]*$ ]]; then
+        NAME="${BASH_REMATCH[1]}"
+        COMMAND="${BASH_REMATCH[2]}"
+        DESCRIPTION="${BASH_REMATCH[4]}"
+
+    # Double-quoted alias:
+    # alias mb="musicbackup" # Start music backup
+    elif [[ $line =~ ^[[:space:]]*alias[[:space:]]+([[:alnum:]_]+)=\"([^\"]*)\"[[:space:]]*(#[[:space:]]*:?[[:space:]]*(.*))?[[:space:]]*$ ]]; then
+        NAME="${BASH_REMATCH[1]}"
+        COMMAND="${BASH_REMATCH[2]}"
+        DESCRIPTION="${BASH_REMATCH[4]}"
+    else
+        continue
+    fi
+
+    if [[ -z "$DESCRIPTION" ]]; then
+        DESCRIPTION="$COMMAND"
+    fi
+
+    NAMES+=("$NAME")
+    COMMANDS+=("$COMMAND")
+    DESCRIPTIONS+=("$DESCRIPTION")
+
+    (( ${#NAME} > MAX_ALIAS_LENGTH )) &&
+        MAX_ALIAS_LENGTH=${#NAME}
+
+    (( ${#DESCRIPTION} > MAX_DESCRIPTION_LENGTH )) &&
+        MAX_DESCRIPTION_LENGTH=${#DESCRIPTION}
+
+done < "$BASHRC"
+
+if (( ${#NAMES[@]} == 0 )); then
+    printf '%sNo aliases found in %s.%s\n' \
+        "$RED" "$BASHRC" "$RESET"
+    exit 0
+fi
+
+ALIAS_WIDTH=$((MAX_ALIAS_LENGTH + COLUMN_PADDING))
+DESCRIPTION_WIDTH=$((MAX_DESCRIPTION_LENGTH + COLUMN_PADDING))
+
+(( ALIAS_WIDTH < MIN_ALIAS_WIDTH )) &&
+    ALIAS_WIDTH=$MIN_ALIAS_WIDTH
+
+(( DESCRIPTION_WIDTH < MIN_DESCRIPTION_WIDTH )) &&
+    DESCRIPTION_WIDTH=$MIN_DESCRIPTION_WIDTH
+
+print_cmd() {
+    local name="$1"
+    local description="$2"
+    local command="$3"
+
+    printf '  %s%-*s%s %s%-*s%s %s%s%s\n' \
+        "$CYAN" "$ALIAS_WIDTH" "$name" "$RESET" \
+        "$GREEN" "$DESCRIPTION_WIDTH" "$description" "$RESET" \
+        "$YELLOW" "$command" "$RESET"
+}
+
+echo
+printf '%s****************************************************%s\n' \
+    "$GREEN" "$RESET"
+printf '%s***  Available aliases%s\n' \
+    "$YELLOW" "$RESET"
+printf '%s****************************************************%s\n\n' \
+    "$GREEN" "$RESET"
+
+print_cmd "$ALIAS_HEADER" "$DESCRIPTION_HEADER" "$COMMAND_HEADER"
+
+printf '  %s%-*s%s %s%-*s%s %s%s%s\n' \
+    "$CYAN" "$ALIAS_WIDTH" "$(printf '%*s' "${#ALIAS_HEADER}" '' | tr ' ' '-')" "$RESET" \
+    "$GREEN" "$DESCRIPTION_WIDTH" "$(printf '%*s' "${#DESCRIPTION_HEADER}" '' | tr ' ' '-')" "$RESET" \
+    "$YELLOW" "$(printf '%*s' "${#COMMAND_HEADER}" '' | tr ' ' '-')" "$RESET"
+
+for i in "${!NAMES[@]}"; do
+    print_cmd \
+        "${NAMES[$i]}" \
+        "${DESCRIPTIONS[$i]}" \
+        "${COMMANDS[$i]}"
+done
+
+echo
+
