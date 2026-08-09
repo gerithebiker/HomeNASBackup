@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+CONFIG_FILE='/etc/musicbackup.conf'
+source "$CONFIG_FILE"
+
+COMMAND="${*:-true}"
+
+for attempt in 1 2 3; do
+
+    /opt/bin/expect <<EOF
+set timeout 15
+
+spawn ssh \
+    -o StrictHostKeyChecking=yes \
+    -o ConnectTimeout=5 \
+    "${WD_SSH_USER}@${WD_HOST}" \
+    "$COMMAND"
+
+expect {
+    "*assword:*" {
+        send -- "${WD_SSH_PASSWORD}\r"
+        exp_continue
+    }
+    eof
+}
+
+catch wait result
+exit [lindex \$result 3]
+EOF
+
+    RC=$?
+
+    if (( RC == 0 )); then
+        exit 0
+    fi
+
+    if (( attempt < 3 )); then
+        echo "WD not ready yet, retrying in 5 seconds..." >&2
+        sleep 5
+    fi
+done
+
+echo "ERROR: Unable to establish SSH connection to WD." >&2
+exit 1
+

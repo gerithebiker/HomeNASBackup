@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+
+set -uo pipefail
+
+CONFIG_FILE='/etc/musicbackup.conf'
+
+# {{{ Colors
+
+RED='\033[1;31m'
+GREEN='\033[1;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[1;36m'
+RESET='\033[0m'
+
+# }}}
+
+# {{{ Configuration
+
+if [[ ! -r "$CONFIG_FILE" ]]; then
+    printf "${RED}ERROR:${RESET} Cannot read %s\n" "$CONFIG_FILE" >&2
+    exit 1
+fi
+
+# shellcheck source=/dev/null
+source "$CONFIG_FILE"
+
+: "${WD_HOST:?WD_HOST is not defined in $CONFIG_FILE}"
+: "${WD_SSH_USER:?WD_SSH_USER is not defined in $CONFIG_FILE}"
+
+WD_BOOT_TIMEOUT=180
+CHECK_INTERVAL=5
+
+# }}}
+
+printf "${CYAN}Starting WD backup NAS...${RESET}\n"
+
+# {{{ Power on
+
+printf "  Powering on Shelly... "
+
+if ! shelly on >/dev/null; then
+    printf "${RED}FAILED${RESET}\n"
+    printf "${RED}ERROR:${RESET} Shelly is unreachable or could not switch on.\n" >&2
+    exit 10
+fi
+
+printf "${GREEN}OK${RESET}\n"
+
+# }}}
+
+# {{{ Wait for network
+
+printf "  Waiting for WD network... "
+
+elapsed=0
+
+while ! sudo /bin/ping -c 1 -W 2 "$WD_HOST" >/dev/null 2>&1; do
+    sleep "$CHECK_INTERVAL"
+    ((elapsed += CHECK_INTERVAL))
+
+    if (( elapsed >= WD_BOOT_TIMEOUT )); then
+        printf "${RED}TIMEOUT${RESET}\n"
+        printf "${RED}ERROR:${RESET} WD did not appear on the network within %d seconds.\n" \
+            "$WD_BOOT_TIMEOUT" >&2
+        exit 11
+    fi
+done
+
+printf "${GREEN}OK${RESET}\n"
+
+# }}}
+
+# {{{ Wait for SSH
+
+printf "  Waiting for WD services... "
+
+elapsed=0
+
+while ! wd-ssh true >/dev/null 2>&1; do
+    sleep "$CHECK_INTERVAL"
+    ((elapsed += CHECK_INTERVAL))
+
+    if (( elapsed >= WD_BOOT_TIMEOUT )); then
+        printf "${RED}TIMEOUT${RESET}\n"
+        printf "${RED}ERROR:${RESET} WD is online but SSH did not become available.\n" >&2
+        exit 12
+    fi
+done
+
+printf "${GREEN}OK${RESET}\n"
+
+# }}}
+
+printf "\n${GREEN}WD backup NAS is ready.${RESET}\n"
+exit 0
+

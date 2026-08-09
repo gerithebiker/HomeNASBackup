@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+CONFIG_FILE="/etc/musicbackup.conf"
+
+if [[ $EUID -ne 0 ]]; then
+    exec sudo "$0" "$@"
+fi
+
+source "$CONFIG_FILE"
+
+RPC_URL="http://${SHELLY_IP}"
+
+##############################################################################
+# Colors
+##############################################################################
+
+RED='\033[1;31m'
+GREEN='\033[1;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[1;36m'
+WHITE='\033[1;37m'
+RESET='\033[0m'
+
+##############################################################################
+
+rpc() {
+    curl -fsS \
+        --user "${SHELLY_USER}:${SHELLY_PASSWORD}" \
+        "$1"
+}
+
+usage() {
+    printf "${RED}Usage: ${RESET}${YELLOW}$(basename "$0") ${CYAN}{on|off|status}${RESET}\n"
+    exit 1
+}
+
+show_status(){
+        JSON="$(rpc "${RPC_URL}/rpc/Switch.GetStatus?id=0")"
+
+        STATE=$(echo "$JSON" | grep -o '"output":[^,]*' | cut -d: -f2)
+        VOLTAGE=$(echo "$JSON" | grep -o '"voltage":[^,]*' | cut -d: -f2)
+        POWER=$(echo "$JSON" | grep -o '"apower":[^,]*' | cut -d: -f2)
+        CURRENT=$(echo "$JSON" | grep -o '"current":[^,]*' | cut -d: -f2)
+        TEMP=$(echo "$JSON" | grep -o '"tC":[^,}]*' | cut -d: -f2)
+
+        echo
+        printf "${WHITE}%-12s${RESET}" "Device:"
+        printf "WD Backup Power\n"
+
+        printf "${WHITE}%-12s${RESET}" "State:"
+
+        if [[ "$STATE" == "true" ]]; then
+            printf "${GREEN}ON${RESET}\n"
+        else
+            printf "${RED}OFF${RESET}\n"
+        fi
+
+        printf "${WHITE}%-12s${RESET}" "Voltage:"
+        printf "%.1f V\n" "$VOLTAGE"
+
+        printf "${WHITE}%-12s${RESET}" "Power:"
+        printf "%.1f W\n" "$POWER"
+
+        printf "${WHITE}%-12s${RESET}" "Current:"
+        printf "%.3f A\n" "$CURRENT"
+
+        printf "${WHITE}%-12s${RESET}" "Temp:"
+        printf "%.1f °C\n" "$TEMP"
+
+        echo
+}
+
+case ${1:-} in
+
+    on)
+
+        printf "${CYAN}Turning WD power ON... ${RESET}"
+
+        if rpc "${RPC_URL}/rpc/Switch.Set?id=0&on=true" >/dev/null; then
+            printf "${GREEN}OK${RESET}\n"
+        else
+            printf "${RED}FAILED${RESET}\n"
+            exit 1
+        fi
+		show_status
+        ;;
+
+    off)
+
+        printf "${CYAN}Turning WD power OFF... ${RESET}"
+
+        if rpc "${RPC_URL}/rpc/Switch.Set?id=0&on=false" >/dev/null; then
+            printf "${GREEN}OK${RESET}\n"
+        else
+            printf "${RED}FAILED${RESET}\n"
+            exit 1
+        fi
+		show_status
+        ;;
+
+    status)
+		show_status
+		;;
+    *)
+		show_status
+        usage
+        ;;
+esac
+
