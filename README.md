@@ -607,6 +607,6 @@ the duration of a backup.
 
 ## License
 
-This project is licensed under the BSD 3-Clause License.
+This project is licensed under the BSD 2-Clause "Simplified" License.
 
-Copyright © 2026 Geri Laszlo.
+Copyright © 2026 Geri (The Biker) László.
