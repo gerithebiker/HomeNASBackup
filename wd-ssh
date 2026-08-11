@@ -1,8 +1,30 @@
 #!/usr/bin/env bash
+#
+# wd-ssh
+#
+# SSH wrapper for the WD backup NAS.
+# Uses Expect to provide password authentication and allows commands
+# to be executed on the WD without interactive password entry.
+#
+# Usage:
+#   wd-ssh [command [arguments...]]
+#
+# Examples:
+#   wd-ssh uptime
+#   wd-ssh 'cat /etc/version'
+#
 
 set -euo pipefail
 
 CONFIG_FILE='/etc/musicbackup.conf'
+
+if [[ ! -r "$CONFIG_FILE" ]]; then
+    RED=$'\033[1;31m' # Colors are defined in the config file, but here config is not available...
+    RESET=$'\033[0m'
+    printf "${RED}ERROR:${RESET} Cannot read %s\n" "$CONFIG_FILE" >&2
+    exit 1
+fi
+
 source "$CONFIG_FILE"
 
 COMMAND="${*:-true}"
@@ -14,6 +36,7 @@ set timeout 15
 
 spawn ssh \
     -o StrictHostKeyChecking=yes \
+	-o UserKnownHostsFile="${SSH_KNOWN_HOSTS}" \
     -o ConnectTimeout=5 \
     "${WD_SSH_USER}@${WD_HOST}" \
     "$COMMAND"

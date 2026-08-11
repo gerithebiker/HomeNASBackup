@@ -1,45 +1,54 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
-# Synology -> WD My Cloud music mirror over NFS
+# synology_to_wd_music_backup.sh
+#
+# Mirrors the Synology music library to the WD backup NAS over NFS.
+# Performs an rsync synchronization followed by a second dry-run
+# verification and writes a detailed log and final report.
 #
 # Usage:
-#   sudo ./synology_to_wd_music_backup.sh
-#   sudo ./synology_to_wd_music_backup.sh --dry-run
+#   synology_to_wd_music_backup.sh
+#   synology_to_wd_music_backup.sh --dry-run
+#
+# Options:
+#   --dry-run    Preview changes without copying or deleting files.
 #
 # Exit codes:
-#   0 = success
-#   1 = setup, mount, rsync, or verification error
-#   2 = post-copy verification found pending differences
+#   0    Backup and verification completed successfully.
+#   1    Setup, mount, rsync, or verification error.
+#   2    Post-copy verification found pending differences.
 #
 
 set -Eeuo pipefail
 IFS=$'\n\t'
+START_EPOCH="$(date +%s)"
 
-# ===== CONFIG =====
-SOURCE="/volume1/music/"
-WD_HOST="192.168.1.210"
-WD_EXPORT="/nfs/WDMusic"
-MOUNT_POINT="/volume1/WD_NAS/Music"
-DEST_SUBDIR="/"
-NFS_OPTIONS="vers=3,tcp,nolock,rw,hard,timeo=600,retrans=2"
-TARGET_MARKER=".wd_music_backup_target"
-LOG_DIR="/volume1/WD_NAS/BackupLogs"
-LOCK_DIR="/tmp/wd-music-backup.lock"
-EXCLUDES=(
-    "@eaDir/"
-    "#recycle/"
-    ".DS_Store"
-    "Thumbs.db"
-    ".rsync-partial/"
-    "!!*"
-    "*Temp*"
-    "##*"
-    "__*"
-)
-LOG_RETENTION_DAYS=365
+# -------------------------------------
+# Now we source in the global variables
+# -------------------------------------
+CONFIG_FILE='/etc/musicbackup.conf'
 
-# ==================
+if [[ ! -r "$CONFIG_FILE" ]]; then
+    RED=$'\033[1;31m'
+    RESET=$'\033[0m'
+    printf "${RED}ERROR:${RESET} Cannot read %s\n" "$CONFIG_FILE" >&2
+    exit 1
+fi
 
+# shellcheck source=/dev/null
+source "$CONFIG_FILE"
+
+# now we check if the library is in from the config, and read it
+if [[ ! -r "$LIB_FILE" ]]; then
+    printf 'ERROR: Cannot read library: %s\n' "$LIB_FILE" >&2
+    exit 1
+fi
+
+# shellcheck source=/dev/null
+source "$LIB_FILE"
+
+# ==============================================
+# Now we set the variables for the script to run
 
 MODE="LIVE"
 if [[ "${1:-}" == "--dry-run" ]]; then
@@ -256,6 +265,10 @@ rsync \
     "${RSYNC_EXCLUDE_ARGS[@]}" \
     "$SOURCE" "$DEST" >"$VERIFY_FILE" 2>&1
 VERIFY_EXIT=$?
+
+# Next line added for debugging
+printf 'DEBUG: survived verify rsync, rc=%d, shell flags=%s\n' "$VERIFY_EXIT" "$-" >&2
+
 set -e
 
 if [[ "$VERIFY_EXIT" -ne 0 ]]; then
@@ -263,7 +276,7 @@ if [[ "$VERIFY_EXIT" -ne 0 ]]; then
     die "Verification rsync failed with exit code $VERIFY_EXIT."
 fi
 
-VERIFY_CHANGES="$(grep -cve '^[[:space:]]*$' "$VERIFY_FILE" || true)"
+VERIFY_CHANGES="$(grep -c '|' "$VERIFY_FILE" || true)"
 
 if [[ "$VERIFY_CHANGES" -eq 0 ]]; then
     VERIFY_STATUS="PASSED"
@@ -306,6 +319,12 @@ else
 fi
 
 # }}} End Housekeeping
+END_EPOCH="$(date +%s)"
+DURATION=$((END_EPOCH - START_EPOCH))
+
+printf "${GREEN}================= Time Report ==================${RESET}\n"
+printf "${GREEN}Backup runtime: %s ${CYAN}$(format_duration "$DURATION")${RESET}\n"
+printf "${GREEN}================================================${RESET}\n"
 
 log "Backup completed and verified successfully."
 exit 0

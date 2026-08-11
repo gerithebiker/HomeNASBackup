@@ -1,4 +1,21 @@
 #!/usr/bin/env bash
+#
+# bigShelly
+#
+# Command-line interface for the Shelly power controller used by the
+# WD backup NAS. Provides power switching and status information via
+# the Shelly local RPC interface.
+#
+# Usage:
+#   bigShelly {on|off|status|state|power}
+#
+# Commands:
+#   on        Switch power on.
+#   off       Switch power off.
+#   status    Display detailed device and power status.
+#   state     Print only ON or OFF.
+#   power     Print only the current power consumption in watts.
+#
 
 set -euo pipefail
 
@@ -75,7 +92,6 @@ show_status(){
 case ${1:-} in
 
     on)
-
         printf "${CYAN}Turning WD power ON... ${RESET}"
 
         if rpc "${RPC_URL}/rpc/Switch.Set?id=0&on=true" >/dev/null; then
@@ -88,7 +104,6 @@ case ${1:-} in
         ;;
 
     off)
-
         printf "${CYAN}Turning WD power OFF... ${RESET}"
 
         if rpc "${RPC_URL}/rpc/Switch.Set?id=0&on=false" >/dev/null; then
@@ -100,9 +115,34 @@ case ${1:-} in
 		show_status
         ;;
 
-    status)
+	power)
+		JSON="$(rpc "${RPC_URL}/rpc/Switch.GetStatus?id=0")" || exit 1
+		POWER=$(echo "$JSON" | grep -o '"apower":[^,]*' | cut -d: -f2)
+		printf '%s\n' "$POWER"
+		;;
+
+	state)
+		JSON="$(rpc "${RPC_URL}/rpc/Switch.GetStatus?id=0")" || exit 1
+		STATE=$(echo "$JSON" | grep -o '"output":[^,}]*' | cut -d: -f2)
+
+		case "$STATE" in
+			true)
+				printf 'ON\n'
+				;;
+			false)
+				printf 'OFF\n'
+				;;
+			*)
+				printf 'UNKNOWN\n'
+				exit 1
+				;;
+		esac
+		;;
+
+	status)
 		show_status
 		;;
+
     *)
 		show_status
         usage

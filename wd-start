@@ -1,22 +1,25 @@
 #!/usr/bin/env bash
+#
+# wd-start
+#
+# Starts the WD backup NAS using the Shelly power controller and waits
+# until the NAS is reachable, SSH services are available, and the
+# required NFS export is ready for use.
+#
+# Usage:
+#   wd-start
+#
+# Exit codes indicate the stage at which startup failed.
+#
 
 set -uo pipefail
 
+# {{{ Configuration
 CONFIG_FILE='/etc/musicbackup.conf'
 
-# {{{ Colors
-
-RED='\033[1;31m'
-GREEN='\033[1;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[1;36m'
-RESET='\033[0m'
-
-# }}}
-
-# {{{ Configuration
-
 if [[ ! -r "$CONFIG_FILE" ]]; then
+	RED=$'\033[1;31m' # Colors are defined in the config file, but here config is not available...
+	RESET=$'\033[0m'
     printf "${RED}ERROR:${RESET} Cannot read %s\n" "$CONFIG_FILE" >&2
     exit 1
 fi
@@ -24,13 +27,28 @@ fi
 # shellcheck source=/dev/null
 source "$CONFIG_FILE"
 
-: "${WD_HOST:?WD_HOST is not defined in $CONFIG_FILE}"
-: "${WD_SSH_USER:?WD_SSH_USER is not defined in $CONFIG_FILE}"
+# now we check if the needed variables are in from the config
+if [[ ! -r "$LIB_FILE" ]]; then
+    printf 'ERROR: Cannot read library: %s\n' "$LIB_FILE" >&2
+    exit 1
+fi
 
-WD_BOOT_TIMEOUT=180
-CHECK_INTERVAL=5
+# shellcheck source=/dev/null
+source "$LIB_FILE"
 
-# }}}
+: "${WD_POWER_OFF_THRESHOLD:?WD_POWER_OFF_THRESHOLD is not defined in $CONFIG_FILE}"
+
+[[ -x "$WD_SSH" ]] || {
+    printf "${RED}ERROR:${RESET} wd-ssh not found or not executable: %s\n" "$WD_SSH" >&2
+    exit 1
+}
+
+[[ -x "$BIG_SHELLY" ]] || {
+    printf "${RED}ERROR:${RESET} bigShelly not found or not executable: %s\n" "$BIG_SHELLY" >&2
+    exit 1
+}
+
+# }}} End of Configuration
 
 printf "${CYAN}Starting WD backup NAS...${RESET}\n"
 
@@ -38,7 +56,7 @@ printf "${CYAN}Starting WD backup NAS...${RESET}\n"
 
 printf "  Powering on Shelly... "
 
-if ! shelly on >/dev/null; then
+if ! "$BIG_SHELLY" on >/dev/null; then
     printf "${RED}FAILED${RESET}\n"
     printf "${RED}ERROR:${RESET} Shelly is unreachable or could not switch on.\n" >&2
     exit 10
@@ -52,11 +70,14 @@ printf "${GREEN}OK${RESET}\n"
 
 printf "  Waiting for WD network... "
 
+# Resetting wait variables
 elapsed=0
+WAIT_STATUS_LAST=0
 
 while ! sudo /bin/ping -c 1 -W 2 "$WD_HOST" >/dev/null 2>&1; do
     sleep "$CHECK_INTERVAL"
     ((elapsed += CHECK_INTERVAL))
+	wait_status "$elapsed"
 
     if (( elapsed >= WD_BOOT_TIMEOUT )); then
         printf "${RED}TIMEOUT${RESET}\n"
@@ -74,11 +95,14 @@ printf "${GREEN}OK${RESET}\n"
 
 printf "  Waiting for WD services... "
 
+# Resetting wait variable
 elapsed=0
+WAIT_STATUS_LAST=0
 
-while ! wd-ssh true >/dev/null 2>&1; do
+while ! "$WD_SSH" true >/dev/null 2>&1; do
     sleep "$CHECK_INTERVAL"
     ((elapsed += CHECK_INTERVAL))
+	wait_status "$elapsed"
 
     if (( elapsed >= WD_BOOT_TIMEOUT )); then
         printf "${RED}TIMEOUT${RESET}\n"
@@ -89,7 +113,43 @@ done
 
 printf "${GREEN}OK${RESET}\n"
 
-# }}}
+# }}} End of Wait for SSH
+
+# {{{ Wait for NFS export
+
+printf "  Waiting for WD NFS export... "
+
+TEST_MOUNT="/tmp/wd-nfs-test"
+sudo mkdir -p "$TEST_MOUNT"
+
+# Resetting wait variable
+elapsed=0
+WAIT_STATUS_LAST=0
+
+while true; do
+    if sudo mount -t nfs \
+        -o vers=3,tcp,nolock,ro,soft,timeo=50,retrans=1 \
+        "${WD_HOST}:/nfs/WDMusic" \
+        "$TEST_MOUNT" >/dev/null 2>&1
+    then
+        sudo umount "$TEST_MOUNT" >/dev/null 2>&1 || true
+        break
+    fi
+
+    sleep "$CHECK_INTERVAL"
+    ((elapsed += CHECK_INTERVAL))
+	wait_status "$elapsed"
+
+    if (( elapsed >= WD_BOOT_TIMEOUT )); then
+        printf "${RED}TIMEOUT${RESET}\n"
+        printf "${RED}ERROR:${RESET} WD is online, but NFS export did not become available.\n" >&2
+        exit 13
+    fi
+done
+
+printf "${GREEN}OK${RESET}\n"
+
+# }}} End of Wait for NFS export
 
 printf "\n${GREEN}WD backup NAS is ready.${RESET}\n"
 exit 0

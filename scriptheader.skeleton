@@ -1,0 +1,52 @@
+# This is a skeleton file for any new script for a new script in this toolset
+# {{{ Config reading/handling
+
+CONFIG_FILE='/etc/musicbackup.conf'
+
+if [[ ! -r "$CONFIG_FILE" ]]; then
+    RED=$'\033[1;31m'
+    RESET=$'\033[0m'
+
+    printf "${RED}ERROR:${RESET} Cannot read %s\n" "$CONFIG_FILE" >&2
+    exit 1
+fi
+
+# shellcheck source=/dev/null
+source "$CONFIG_FILE"
+
+# }}} End Config reading/handling
+
+# {{{ Root check
+
+if [[ $EUID -ne 0 ]]; then
+    printf "${RED}ERROR:${RESET} musicbackup-auto must run as root.\n" >&2
+    exit 1
+fi
+
+# }}}
+
+# {{{ Prerequisites
+
+REQUIRED_SCRIPTS=(
+    "$WD_START"
+    "$WD_STOP"
+    "$BACKUP_SCRIPT"
+)
+
+for SCRIPT in "${REQUIRED_SCRIPTS[@]}"; do
+    if [[ ! -x "$SCRIPT" ]]; then
+        printf "${RED}ERROR:${RESET} Script not found or not executable: %s\n" "$SCRIPT" >&2
+        exit 1
+    fi
+done
+
+# now we check if the library is in from the config, and read it
+if [[ ! -r "$LIB_FILE" ]]; then
+    printf 'ERROR: Cannot read library: %s\n' "$LIB_FILE" >&2
+    exit 1
+fi
+
+# shellcheck source=/dev/null
+source "$LIB_FILE"
+
+# }}} End of Rerequisites

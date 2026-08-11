@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+#
+# mbStatus
+#
+# Displays a concise status summary of the most recent WD music backup.
+# Finds the latest backup log and reports the run time, result,
+# exit code, status message, and log file.
+#
+# Usage:
+#   mbStatus
+#
+
+set -uo pipefail
+
+LOG_DIR='/volume1/WD_NAS/BackupLogs'
+
+# {{{ Colors
+
+RED='\033[1;31m'
+GREEN='\033[1;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[1;36m'
+RESET='\033[0m'
+
+# }}}
+
+# {{{ Find latest log
+
+LATEST_LOG=`find "$LOG_DIR" -type f -name '*.log' -printf '%T@ %p\n' \
+    | sort -nr \
+    | head -1 \
+    | cut -d' ' -f2-`
+
+if [[ -z "$LATEST_LOG" || ! -f "$LATEST_LOG" ]]; then
+    printf "${RED}ERROR:${RESET} No backup log found.\n" >&2
+    exit 1
+fi
+
+# }}}
+
+# {{{ Basic information
+
+LOG_NAME=$(basename "$LATEST_LOG")
+
+TIMESTAMP="${LOG_NAME%.log}"
+TIMESTAMP="${TIMESTAMP#wd_music_backup_}"
+
+DATE="${TIMESTAMP%%_*}"
+TIME="${TIMESTAMP#*_}"
+TIME="${TIME//-/:}"
+
+TIMESTAMP="$DATE $TIME"
+
+# Easier / safer timestamp from filesystem if filename parsing fails
+if [[ -z "$TIMESTAMP" ]]; then
+    TIMESTAMP=$(date -r "$LATEST_LOG" '+%Y-%m-%d %H:%M:%S')
+fi
+
+# }}}
+
+# {{{ Determine result
+
+EXIT_CODE=$(grep -Eio 'exit code[: ]+[0-9]+' "$LATEST_LOG" \
+    | tail -1 \
+    | grep -Eo '[0-9]+' || true)
+
+if grep -qiE 'backup (finished|completed).*success|successfully completed|backup successful' \
+    "$LATEST_LOG"; then
+
+    RESULT="SUCCESS"
+    RESULT_COLOR="$GREEN"
+    EXIT_CODE="${EXIT_CODE:-0}"
+
+elif [[ -n "$EXIT_CODE" && "$EXIT_CODE" != "0" ]]; then
+
+    RESULT="FAILED"
+    RESULT_COLOR="$RED"
+
+elif grep -qiE 'error:|failed|failure|rsync error' "$LATEST_LOG"; then
+
+    RESULT="FAILED"
+    RESULT_COLOR="$RED"
+    EXIT_CODE="${EXIT_CODE:-unknown}"
+
+else
+
+    RESULT="UNKNOWN"
+    RESULT_COLOR="$YELLOW"
+    EXIT_CODE="${EXIT_CODE:-unknown}"
+
+fi
+
+# }}}
+
+# {{{ Last relevant message
+
+LAST_MESSAGE=$(grep -Ei \
+    'error:|failed|failure|success|completed|finished|exit code' \
+    "$LATEST_LOG" \
+    | tail -1 \
+    | sed 's/^[[:space:]]*//' || true)
+
+[[ -z "$LAST_MESSAGE" ]] && LAST_MESSAGE="No summary line found in log."
+
+# }}}
+
+# {{{ Output
+
+printf "\n${CYAN}Music Backup Status${RESET}\n"
+echo "-------------------"
+printf "Last run:   %s\n" "$TIMESTAMP"
+printf "Result:     ${RESULT_COLOR}%s${RESET}\n" "$RESULT"
+printf "Exit code:  %s\n" "$EXIT_CODE"
+printf "Message:    %s\n" "$LAST_MESSAGE"
+printf "Log:        %s\n" "$LOG_NAME"
+
+# }}}
+
+[[ "$RESULT" == "SUCCESS" ]]
+

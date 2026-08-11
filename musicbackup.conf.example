@@ -1,0 +1,130 @@
+# -----------------------------------------------------------------------------
+# Shelly configuration
+# -----------------------------------------------------------------------------
+
+SHELLY_IP='192.168.x.xxx'              # IP address of the Shelly device
+SHELLY_USER='admin'
+SHELLY_PASSWORD='ShellyPasswordHere'
+
+
+# -----------------------------------------------------------------------------
+# Paths and common script configuration
+# -----------------------------------------------------------------------------
+
+HOME_DIR="/var/services/homes/YourUsername"
+BIN_DIR="${HOME_DIR}/bin"
+
+WD_SSH="${BIN_DIR}/wd-ssh"
+BIG_SHELLY="${BIN_DIR}/bigShelly"
+WD_START="${BIN_DIR}/wd-start"
+WD_STOP="${BIN_DIR}/wd-stop"
+BACKUP_SCRIPT="${BIN_DIR}/synology_to_wd_music_backup.sh"
+LIB_FILE="${BIN_DIR}/musicbackup-lib.sh"
+MB_STATUS="${BIN_DIR}/mbStatus"
+
+SSH_KNOWN_HOSTS="${HOME_DIR}/.ssh/known_hosts"
+
+LOCK_DIR="/tmp/wd-music-backup.lock"
+
+
+# -----------------------------------------------------------------------------
+# musicbackup interactive wrapper
+# -----------------------------------------------------------------------------
+
+SCREEN_BIN="/opt/sbin/screen"
+SESSION_NAME="MusicBackup"
+WINDOW_NAME="Backup"
+
+
+# -----------------------------------------------------------------------------
+# Synology -> WD backup configuration
+# -----------------------------------------------------------------------------
+
+# Source directory on the Synology NAS.
+# Update this to the directory you want to back up.
+SOURCE="/volume1/music/"
+
+# NFS export on the WD NAS.
+WD_EXPORT="/nfs/WDMusic"
+
+# Local mount point on the Synology.
+MOUNT_POINT="/volume1/WD_NAS/Music"
+
+# Optional subdirectory inside the mounted export.
+DEST_SUBDIR="/"
+
+# NFS mount options.
+NFS_OPTIONS="vers=3,tcp,nolock,rw,hard,timeo=600,retrans=2"
+
+# Safety marker that must exist on the WD target volume.
+# The backup refuses to run if this file is missing.
+TARGET_MARKER=".wd_music_backup_target"
+
+# Backup and verification log directory.
+LOG_DIR="/volume1/WD_NAS/BackupLogs"
+
+# rsync exclude patterns.
+EXCLUDES=(
+    "@eaDir/"
+    "#recycle/"
+    ".DS_Store"
+    "Thumbs.db"
+    ".rsync-partial/"
+    "!!*"
+    "*Temp*"
+    "##*"
+    "__*"
+)
+
+# Number of days backup logs are retained.
+LOG_RETENTION_DAYS=365
+
+
+# -----------------------------------------------------------------------------
+# WD Backup NAS
+# -----------------------------------------------------------------------------
+
+WD_HOST='192.168.x.xxx'                # IP address of the WD NAS
+WD_SSH_USER='sshd'                     # SSH user configured on the WD NAS
+WD_SSH_PASSWORD='WDPasswordHere'
+
+
+# -----------------------------------------------------------------------------
+# WD power monitoring
+# -----------------------------------------------------------------------------
+
+# Power thresholds in Watts.
+# Adjust these values for your own hardware.
+#
+# Above WD_POWER_ON_THRESHOLD the NAS is considered running.
+# Below WD_POWER_OFF_THRESHOLD the NAS is considered safely shut down.
+
+WD_POWER_ON_THRESHOLD='8.0'
+WD_POWER_OFF_THRESHOLD='4.0'
+
+
+# -----------------------------------------------------------------------------
+# WD NFS mount points
+# -----------------------------------------------------------------------------
+
+# NFS mount points that must be unmounted before shutting down the WD.
+
+WD_MOUNT_POINTS=(
+    "/volume1/WD_NAS/Music"
+    "/volume1/WD_NAS/Share"
+)
+
+
+# -----------------------------------------------------------------------------
+# Timeouts and polling
+# -----------------------------------------------------------------------------
+
+# Maximum time to wait for the WD to become fully ready.
+WD_BOOT_TIMEOUT=600
+
+# Maximum time to wait for the WD to shut down.
+WD_SHUTDOWN_TIMEOUT=600
+
+# Interval between status checks.
+CHECK_INTERVAL=5
+

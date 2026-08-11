@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+
+set -uo pipefail
+
+CONFIG_FILE='/etc/musicbackup.conf'
+
+if [[ ! -r "$CONFIG_FILE" ]]; then
+    RED=$'\033[1;31m'
+    RESET=$'\033[0m'
+    printf "${RED}ERROR:${RESET} Cannot read %s\n" "$CONFIG_FILE" >&2
+    exit 1
+fi
+
+# shellcheck source=/dev/null
+source "$CONFIG_FILE"
+
+START_EPOCH=$(date +%s)
+
+printf "Monitoring WD shutdown...\n"
+printf "Threshold: %.1f W\n\n" "$WD_POWER_OFF_THRESHOLD"
+
+while true; do
+    NOW=$(date '+%Y-%m-%d %H:%M:%S')
+
+    POWER="$("$BIG_SHELLY" power 2>/dev/null)" || {
+        printf "[%s] ERROR: Could not read Shelly power.\n" "$NOW"
+        sleep "$CHECK_INTERVAL"
+        continue
+    }
+
+    ELAPSED=$(( $(date +%s) - START_EPOCH ))
+
+    printf "[%s] %6.1f W   elapsed %02d:%02d:%02d\n" \
+        "$NOW" "$POWER" \
+        $((ELAPSED / 3600)) \
+        $(((ELAPSED % 3600) / 60)) \
+        $((ELAPSED % 60))
+
+    if awk "BEGIN { exit !($POWER < $WD_POWER_OFF_THRESHOLD) }"; then
+        echo
+        printf "WD reached shutdown power level after %02d:%02d:%02d.\n" \
+            $((ELAPSED / 3600)) \
+            $(((ELAPSED % 3600) / 60)) \
+            $((ELAPSED % 60))
+        exit 0
+    fi
+
+    sleep "$CHECK_INTERVAL"
+done
