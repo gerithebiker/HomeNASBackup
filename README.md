@@ -228,7 +228,7 @@ Typical configuration includes:
 ```bash
 SOURCE="/volume1/music/"
 
-WD_HOST="192.168.1.210"
+WD_HOST="192.168.x.xxx"
 WD_EXPORT="/nfs/WDMusic"
 
 MOUNT_POINT="/volume1/WD_NAS/Music"
