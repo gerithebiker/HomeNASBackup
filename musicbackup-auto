@@ -142,14 +142,14 @@ else
 fi
 
 printf '\n'
-printf '================ Backup Report ===============\n'
-printf 'Status:          %s\n' "$RESULT"
-printf 'WD startup:      %s\n' "$([[ $START_CODE -eq 0 ]] && echo PASSED || echo FAILED)"
-printf 'Backup:          %s\n' "$([[ $BACKUP_CODE -eq 0 ]] && echo PASSED || echo FAILED)"
-printf 'WD shutdown:     %s\n' "$([[ $STOP_CODE -eq 0 ]] && echo PASSED || echo FAILED)"
-printf 'Backup runtime:  %s\n' "$(format_duration "$BACKUP_DURATION")"
-printf 'Total runtime:   %s\n' "$(format_duration "$DURATION")"
-printf '==============================================\n'
+printf '================= Backup Report =================\n'
+printf 'Status:           %s\n' "$RESULT"
+printf 'WD startup:       %s\n' "$([[ $START_CODE -eq 0 ]] && echo PASSED || echo FAILED)"
+printf 'Backup:           %s\n' "$([[ $BACKUP_CODE -eq 0 ]] && echo PASSED || echo FAILED)"
+printf 'WD shutdown:      %s\n' "$([[ $STOP_CODE -eq 0 ]] && echo PASSED || echo FAILED)"
+printf 'Backup runtime:   %s\n' "$(format_duration "$BACKUP_DURATION")"
+printf 'Total runtime:    %s\n' "$(format_duration "$DURATION")"
+printf '=================================================\n'
 
 if [[ "$RESULT" == "SUCCESS" ]]; then
     printf 'Automatic WD music backup completed successfully.\n'
