@@ -1,2 +1,13 @@
+# Backup / old files
 *.old
+*.bak
+*.backup
+
+# Editor temporary files
+*~
+*.swp
+*.swo
+*.tmp
+
+# Alias helper files
 aliaslist*
