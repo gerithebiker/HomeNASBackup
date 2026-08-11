@@ -211,6 +211,114 @@ email                → plain text
 No special `--plain` mode is required.
 
 ---
+## Prerequisites
+
+The scripts were developed and tested on Synology DSM 7.
+
+The following components are required:
+
+- Bash
+- rsync
+- NFS client support
+- SSH client
+- `screen`
+- `expect`
+- a supported Shelly smart plug with local network access
+- SSH access to the WD backup NAS
+- NFS export configured on the WD backup NAS
+
+### Entware
+
+Some required utilities are not included with a standard DSM installation.
+
+Install Entware for your Synology platform following the official Entware
+installation instructions.
+
+After installation, Entware packages are normally installed under:
+
+```text
+/opt
+```
+
+### GNU Screen
+
+GNU Screen is used by the interactive `musicbackup` wrapper to run and
+reattach to backup sessions.
+
+It is not included with DSM by default.
+
+Install it through Entware:
+
+```bash
+sudo /opt/bin/opkg update
+sudo /opt/bin/opkg install screen
+```
+
+Verify the installation:
+
+```bash
+/opt/bin/screen --version
+```
+
+The default configuration expects:
+
+```bash
+SCREEN_BIN="/opt/bin/screen"
+```
+
+Adjust `SCREEN_BIN` in `/etc/musicbackup.conf` if Screen is installed
+elsewhere.
+
+### Expect
+
+`wd-ssh` uses `expect` to handle SSH authentication to the WD NAS.
+
+Install it through Entware if it is not already available:
+
+```bash
+sudo /opt/bin/opkg install expect
+```
+
+Verify:
+
+```bash
+which expect
+```
+
+### WD NAS
+
+The WD NAS must provide:
+
+- SSH access
+- an NFS export for the backup volume
+- `/usr/sbin/shutdown.sh` for graceful shutdown
+
+The scripts were developed for a WD NAS running My Cloud OS 5. Other models
+or operating-system versions may require changes, especially to the shutdown
+procedure.
+
+### Shelly
+
+The backup NAS is powered through a Shelly smart plug.
+
+The Shelly must:
+
+- be reachable from the Synology over the local network
+- have local HTTP/API control enabled
+- provide power-consumption measurements
+
+Power thresholds must be adjusted for the actual NAS and power supply.
+
+### Synology permissions
+
+The unattended backup is designed to run as `root` from DSM Task Scheduler.
+
+Root privileges are required for operations including:
+
+- mounting and unmounting NFS filesystems
+- Shelly power-control operations used by this setup
+
+The interactive scripts may be run by a normal user where appropriate.
 
 ## Configuration
 
