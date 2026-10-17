@@ -111,10 +111,17 @@ printf "${GREEN}OK${RESET}\n"
 if awk "BEGIN { exit !($POWER >= $WD_POWER_OFF_THRESHOLD) }"; then
 
     printf "  Sending shutdown command... "
-	"$WD_SSH" 'sync; /usr/sbin/shutdown.sh >/dev/null 2>&1 &' >/dev/null 2>&1 || true
-	printf "${GREEN}SENT${RESET}\n"
+
+    if "$WD_SSH" 'sync; /usr/sbin/shutdown.sh >/dev/null 2>&1 &' >/dev/null 2>&1; then
+        printf "${GREEN}SENT${RESET}\n"
+    else
+        printf "${YELLOW}SSH FAILED${RESET}\n"
+        printf "${YELLOW}WARNING:${RESET} Could not confirm shutdown command delivery.\n" >&2
+        printf "  Will check actual WD power state before switching off Shelly.\n"
+    fi
+
 else
-	printf "  WD already shut down... ${GREEN}OK${RESET}\n"
+    printf "  WD already shut down... ${GREEN}OK${RESET}\n"
 fi
 
 # }}} End of Shutdown WD if still running

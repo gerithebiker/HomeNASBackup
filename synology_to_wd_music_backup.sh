@@ -90,6 +90,8 @@ mounted_source() {
     awk -v mp="$MOUNT_POINT" '$2 == mp {print $1; exit}' /proc/mounts
 }
 
+LOCK_ACQUIRED=0
+
 cleanup() {
     local exit_code=$?
 
@@ -101,8 +103,6 @@ cleanup() {
             log "WARNING: unmount failed; the NFS mount was left in place."
         fi
     fi
-
-    rmdir "$LOCK_DIR" 2>/dev/null || true
 
     local end_epoch duration
     end_epoch="$(date +%s)"
@@ -134,8 +134,15 @@ cleanup() {
         echo "=============================================="
     } | tee -a "$LOG_FILE"
 
+    if (( LOCK_ACQUIRED )); then
+        if ! rmdir "$LOCK_DIR"; then
+            log "WARNING: Could not remove backup lock: $LOCK_DIR"
+        fi
+    fi
+
     exit "$exit_code"
 }
+
 trap cleanup EXIT
 trap 'die "Interrupted."' INT TERM HUP
 
@@ -151,6 +158,8 @@ command -v umount >/dev/null 2>&1 || die "umount is not available."
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
     die "Another backup appears to be running: $LOCK_DIR"
 fi
+
+LOCK_ACQUIRED=1
 
 log "WD music backup started."
 log "Mode:        $MODE"
@@ -299,7 +308,7 @@ OLD_LOG_COUNT=0
 while IFS= read -r FILE; do
     [[ -z "$FILE" ]] && continue
 
-    ((OLD_LOG_COUNT++))
+    ((++OLD_LOG_COUNT))
 
     log "Removing old log: $(basename "$FILE")"
 

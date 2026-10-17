@@ -2,163 +2,210 @@
 #
 # musicbackup-auto
 #
-# Unattended wrapper for the Synology -> WD music backup system.
-# Starts the WD backup NAS, runs the backup without user interaction,
-# then safely shuts down the WD after completion.
-#
-# Intended for scheduled execution by Synology Task Scheduler.
-#
-# Usage:
-#   musicbackup-auto
-#
-# Must be run as root.
+# Unattended Synology -> WD music backup.
+# Always attempts safe WD shutdown after starting the WD.
 #
 
 set -uo pipefail
-START_EPOCH="$(date +%s)"
 
-# {{{ Config reading/handling
+START_EPOCH=$(date +%s)
+START_TIME=$(date '+%Y-%m-%d %H:%M:%S')
+
+# {{{ Configuration
 
 CONFIG_FILE='/etc/musicbackup.conf'
 
 if [[ ! -r "$CONFIG_FILE" ]]; then
-    RED=$'\033[1;31m'
-    RESET=$'\033[0m'
-
-    printf "${RED}ERROR:${RESET} Cannot read %s\n" "$CONFIG_FILE" >&2
+    echo "ERROR: Cannot read $CONFIG_FILE" >&2
     exit 1
 fi
 
-# shellcheck source=/dev/null
 source "$CONFIG_FILE"
 
-# now we check if the library is in from the config, and read it
 if [[ ! -r "$LIB_FILE" ]]; then
-    printf 'ERROR: Cannot read library: %s\n' "$LIB_FILE" >&2
+    echo "ERROR: Cannot read library: $LIB_FILE" >&2
     exit 1
 fi
 
-# shellcheck source=/dev/null
 source "$LIB_FILE"
-
-# }}} End Config reading/handling
-
-# {{{ Non-interactive logging settings
-
-AUTO_TIMESTAMP="$(date '+%Y-%m-%d_%H-%M-%S')"
-AUTO_LOG="${LOG_DIR}/musicbackup_auto_${AUTO_TIMESTAMP}.log"
-
-# }}} End of Non-interactive logging settings
-
-# {{{ Root check
-
-if [[ $EUID -ne 0 ]]; then
-    printf "${RED}ERROR:${RESET} musicbackup-auto must run as root.\n" >&2
-    exit 1
-fi
 
 # }}}
 
 # {{{ Prerequisites
 
+if (( EUID != 0 )); then
+    echo "ERROR: Must run as root." >&2
+    exit 1
+fi
+
 REQUIRED_SCRIPTS=(
     "$WD_START"
     "$WD_STOP"
     "$BACKUP_SCRIPT"
-	"$MB_STATUS"
+    "$MB_STATUS"
 )
 
 for SCRIPT in "${REQUIRED_SCRIPTS[@]}"; do
     if [[ ! -x "$SCRIPT" ]]; then
-        printf "${RED}ERROR:${RESET} Script not found or not executable: %s\n" "$SCRIPT" >&2
+        echo "ERROR: Script unavailable: $SCRIPT" >&2
         exit 1
     fi
 done
 
-# }}} End of Prerequisites
+# Never shut down a WD potentially owned by another backup.
+# Wrapper-level lock: protects the entire WD lifecycle.
+AUTO_LOCK_DIR="${LOCK_DIR}.auto"
 
-# {{{ Prevent duplicate backup
-
-if [[ -d "$LOCK_DIR" ]]; then
-    printf "${YELLOW}Backup already appears to be running.${RESET}\n"
-    printf "Lock: %s\n" "$LOCK_DIR"
+# Do not start if another backup is already running.
+if ! mkdir "$AUTO_LOCK_DIR" 2>/dev/null; then
+    echo "ERROR: Automatic backup already running." >&2
     exit 2
 fi
 
+trap 'rmdir "$AUTO_LOCK_DIR" 2>/dev/null || true' EXIT
+
+if [[ -d "$LOCK_DIR" ]]; then
+    echo "ERROR: Backup lock already exists: $LOCK_DIR" >&2
+    exit 2
+fi
+
+# Temporary cleanup until the full EXIT handler is installed.
+trap 'rmdir "$AUTO_LOCK_DIR" 2>/dev/null || true' EXIT
+
 # }}}
 
-printf "${CYAN}Starting automatic WD music backup...${RESET}\n\n" >>"$AUTO_LOG"
+# {{{ Logging
+
+AUTO_TIMESTAMP=$(date '+%Y-%m-%d_%H-%M-%S')
+AUTO_LOG="${LOG_DIR}/musicbackup_auto_${AUTO_TIMESTAMP}.log"
+
+exec >>"$AUTO_LOG" 2>&1 || exit 1
+
+log() {
+    printf '[%s] %s\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
+}
+
+START_CODE=-1
+BACKUP_CODE=-1
+STOP_CODE=-1
+
+# }}}
+
+# {{{ Finalization
+
+cleanup() {
+    local ORIGINAL_RC=$?
+    local END_EPOCH DURATION RESULT
+
+    # Prevent recursive cleanup.
+    trap - EXIT INT TERM
+
+    log "Starting WD shutdown."
+
+    if "$WD_STOP"; then
+        STOP_CODE=0
+        log "WD shutdown completed."
+    else
+        STOP_CODE=$?
+        log "ERROR: WD shutdown failed (code $STOP_CODE)."
+        log "WARNING: Manual intervention may be required."
+    fi
+
+	# Release lock only after confirmed safe shutdown.
+    if (( STOP_CODE == 0 )); then
+        if rmdir "$AUTO_LOCK_DIR"; then
+            log "Wrapper lock released."
+        else
+            log "ERROR: Could not release wrapper lock: $AUTO_LOCK_DIR"
+            STOP_CODE=26
+        fi
+    else
+        log "WARNING: WD shutdown unsuccessful."
+        log "Keeping wrapper lock: $AUTO_LOCK_DIR"
+        log "Manual inspection required."
+    fi
+
+    END_EPOCH=$(date +%s)
+    DURATION=$((END_EPOCH - START_EPOCH))
+
+    if (( ORIGINAL_RC == 0 &&
+          START_CODE == 0 &&
+          BACKUP_CODE == 0 &&
+          STOP_CODE == 0 )); then
+        RESULT="SUCCESS"
+    else
+        RESULT="FAILED"
+    fi
+
+    printf '\n'
+    printf '================ Backup Report ================\n'
+    printf 'Status:          %s\n' "$RESULT"
+    printf 'Started:         %s\n' "$START_TIME"
+    printf 'Finished:        %s\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S')"
+    printf 'WD startup:      %s\n' "$START_CODE"
+    printf 'Backup:          %s\n' "$BACKUP_CODE"
+    printf 'WD shutdown:     %s\n' "$STOP_CODE"
+    printf 'Total runtime:   %s\n' "$(format_duration "$DURATION")"
+    printf '================================================\n'
+
+    if [[ "$RESULT" == "SUCCESS" ]]; then
+        log "Automatic backup completed successfully."
+        exit 0
+    fi
+
+    log "ERROR: Automatic backup failed."
+
+    # Preserve original failure code where possible.
+    if (( ORIGINAL_RC != 0 )); then
+        exit "$ORIGINAL_RC"
+    fi
+
+    exit 1
+}
+
+# Cleanup becomes active only after prerequisites.
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# }}}
 
 # {{{ Start WD
 
-"$WD_START" >>"$AUTO_LOG" 2>&1
-START_CODE=$?
+log "Starting automatic WD music backup."
+log "Powering on and initializing WD."
 
-if (( START_CODE != 0 )); then
-    printf "\n${RED}ERROR:${RESET} WD startup failed with exit code %d.\n" \
-        "$START_CODE"
+if "$WD_START"; then
+    START_CODE=0
+    log "WD startup completed."
+else
+    START_CODE=$?
+    log "ERROR: WD startup failed (code $START_CODE)."
     exit "$START_CODE"
 fi
-
-echo
 
 # }}}
 
 # {{{ Backup
 
-# First we get time for report
-BACKUP_START_EPOCH="$(date +%s)"
+BACKUP_START_EPOCH=$(date +%s)
 
-# Start backup
-"$BACKUP_SCRIPT" >/dev/null 2>&1
-BACKUP_CODE=$?
+log "Starting music backup."
 
-# Getting endtime for report
-BACKUP_END_EPOCH="$(date +%s)"
+if "$BACKUP_SCRIPT"; then
+    BACKUP_CODE=0
+else
+    BACKUP_CODE=$?
+fi
+
+BACKUP_END_EPOCH=$(date +%s)
 BACKUP_DURATION=$((BACKUP_END_EPOCH - BACKUP_START_EPOCH))
 
-echo
+log "Backup finished with exit code $BACKUP_CODE."
+log "Backup runtime: $(format_duration "$BACKUP_DURATION")"
 
-# }}}
+exit "$BACKUP_CODE"
 
-# {{{ Stop WD
-
-"$WD_STOP" >>"$AUTO_LOG" 2>&1
-STOP_CODE=$?
-
-echo
-
-# }}}
-
-# {{{ Final result
-
-END_EPOCH="$(date +%s)"
-DURATION=$((END_EPOCH - START_EPOCH))
-
-if (( START_CODE == 0 && BACKUP_CODE == 0 && STOP_CODE == 0 )); then
-    RESULT="SUCCESS"
-else
-    RESULT="FAILED"
-fi
-
-printf '\n'
-printf '================= Backup Report =================\n'
-printf 'Status:           %s\n' "$RESULT"
-printf 'WD startup:       %s\n' "$([[ $START_CODE -eq 0 ]] && echo PASSED || echo FAILED)"
-printf 'Backup:           %s\n' "$([[ $BACKUP_CODE -eq 0 ]] && echo PASSED || echo FAILED)"
-printf 'WD shutdown:      %s\n' "$([[ $STOP_CODE -eq 0 ]] && echo PASSED || echo FAILED)"
-printf 'Backup runtime:   %s\n' "$(format_duration "$BACKUP_DURATION")"
-printf 'Total runtime:    %s\n' "$(format_duration "$DURATION")"
-printf '=================================================\n'
-
-if [[ "$RESULT" == "SUCCESS" ]]; then
-    printf 'Automatic WD music backup completed successfully.\n'
-    exit 0
-fi
-
-printf 'Automatic WD music backup FAILED.\n'
-printf 'Exit codes: startup=%d, backup=%d, shutdown=%d\n' "$START_CODE" "$BACKUP_CODE" "$STOP_CODE"
-exit 1
-
-# }}}
-
+# }}} End

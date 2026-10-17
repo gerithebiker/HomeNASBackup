@@ -14,6 +14,11 @@
 #   wd-ssh 'cat /etc/version'
 #
 
+if [[ ! -x /opt/bin/expect ]]; then
+    echo "ERROR: Expect is missing. Check Entware installation." >&2
+    exit 127
+fi
+
 set -euo pipefail
 
 CONFIG_FILE='/etc/musicbackup.conf'
@@ -29,15 +34,18 @@ source "$CONFIG_FILE"
 
 COMMAND="${*:-true}"
 
+LAST_RC=1
+
 for attempt in 1 2 3; do
 
-    /opt/bin/expect <<EOF
+    if /opt/bin/expect <<EOF
 set timeout 15
 
 spawn ssh \
     -o StrictHostKeyChecking=yes \
-	-o UserKnownHostsFile="${SSH_KNOWN_HOSTS}" \
+    -o UserKnownHostsFile="${SSH_KNOWN_HOSTS}" \
     -o ConnectTimeout=5 \
+    -o ConnectionAttempts=1 \
     "${WD_SSH_USER}@${WD_HOST}" \
     "$COMMAND"
 
@@ -46,25 +54,34 @@ expect {
         send -- "${WD_SSH_PASSWORD}\r"
         exp_continue
     }
+    timeout {
+        puts stderr "ERROR: SSH interaction timed out."
+        exit 124
+    }
     eof
 }
 
-catch wait result
+if {[catch {wait} result]} {
+    puts stderr "ERROR: Could not retrieve SSH exit status."
+    exit 125
+}
+
 exit [lindex \$result 3]
 EOF
-
-    RC=$?
-
-    if (( RC == 0 )); then
+    then
         exit 0
+    else
+        LAST_RC=$?
     fi
 
     if (( attempt < 3 )); then
-        echo "WD not ready yet, retrying in 5 seconds..." >&2
+        printf 'WD SSH attempt %d failed (code %d); retrying...\n' \
+            "$attempt" "$LAST_RC" >&2
         sleep 5
     fi
 done
 
-echo "ERROR: Unable to establish SSH connection to WD." >&2
-exit 1
+printf 'ERROR: WD SSH failed after three attempts (code %d).\n' \
+    "$LAST_RC" >&2
 
+exit "$LAST_RC"

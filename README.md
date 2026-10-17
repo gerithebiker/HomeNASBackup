@@ -227,63 +227,116 @@ The following components are required:
 - SSH access to the WD backup NAS
 - NFS export configured on the WD backup NAS
 
-### Entware
+## Entware, Expect and Screen
 
-Some required utilities are not included with a standard DSM installation.
+The backup system uses two utilities provided by Entware:
 
-Install Entware for your Synology platform following the official Entware
-installation instructions.
+- **Expect** — automates password-based SSH authentication to the WD NAS. SSH keys are not used because persistent, secure key storage could not be established on the WD.
+- **GNU Screen** — provides persistent terminal sessions for manually initiated backups. It is not required for scheduled backups.
 
-After installation, Entware packages are normally installed under:
+The SSH password is stored in `/etc/musicbackup.conf`, outside the Git repository. Restrict access to this file.
+
+### Environment
+
+- Synology DSM 7.4.1
+- Architecture: `aarch64`
+- Persistent Entware directory: `/volume1/@Entware/opt`
+- Runtime mount point: `/opt`
+
+### Entware installation
+
+As root, prepare the persistent directory and bind mount:
+
+```bash
+mkdir -p /volume1/@Entware/opt
+mkdir -p /opt
+mount --bind /volume1/@Entware/opt /opt
+```
+
+Download the Entware installer:
+
+```bash
+cd /tmp
+curl -fL \
+  https://bin.entware.net/aarch64-k3.10/installer/generic.sh \
+  -o entware-install.sh
+
+sh /tmp/entware-install.sh
+```
+
+Install the required packages:
+
+```bash
+/opt/bin/opkg update
+/opt/bin/opkg install expect screen
+```
+
+Verify installation:
+
+```bash
+/opt/bin/expect -v
+/opt/sbin/screen --version
+/opt/bin/opkg --version
+```
+
+### Restore Entware after reboot
+
+The `/opt` mount may disappear after a Synology reboot or DSM update. The installed packages remain in the persistent directory, but their executables become inaccessible.
+
+Create a DSM Task Scheduler task:
+
+**Control Panel → Task Scheduler → Create → Triggered Task → User-defined script**
+
+- Task name: `Entware Mount`
+- User: `root`
+- Event: `Boot-up`
+
+Script:
+
+```bash
+#!/bin/sh
+
+ENTWARE_DIR="/volume1/@Entware/opt"
+
+# Wait for the data volume to become available.
+i=0
+while [ ! -x "$ENTWARE_DIR/bin/opkg" ]; do
+    i=$((i + 1))
+    [ "$i" -ge 60 ] && exit 1
+    sleep 5
+done
+
+mkdir -p /opt
+
+if ! grep -qs ' /opt ' /proc/mounts; then
+    mount --bind "$ENTWARE_DIR" /opt || exit 1
+fi
+```
+
+The startup task restores the existing installation; it does not reinstall packages.
+
+After a Synology reboot, verify:
+
+```bash
+/opt/bin/expect -v
+/opt/sbin/screen --version
+```
+
+### Troubleshooting
+
+**Symptom:** Scheduled backup exits with code 12 while the WD responds to ping and accepts SSH connections from other computers.
+
+Check the automatic backup log for:
 
 ```text
-/opt
+/opt/bin/expect: No such file or directory
 ```
 
-### GNU Screen
+If present, verify the Entware mount and the boot-up task before investigating WD SSH services.
 
-GNU Screen is used by the interactive `musicbackup` wrapper to run and
-reattach to backup sessions.
+Do not install packages as part of each backup run. A missing dependency should be treated as a local configuration error.
 
-It is not included with DSM by default.
-
-Install it through Entware:
-
-```bash
-sudo /opt/bin/opkg update
-sudo /opt/bin/opkg install screen
-```
-
-Verify the installation:
-
-```bash
-/opt/bin/screen --version
-```
-
-The default configuration expects:
-
-```bash
-SCREEN_BIN="/opt/bin/screen"
-```
-
-Adjust `SCREEN_BIN` in `/etc/musicbackup.conf` if Screen is installed
-elsewhere.
-
-### Expect
-
-`wd-ssh` uses `expect` to handle SSH authentication to the WD NAS.
-
-Install it through Entware if it is not already available:
-
-```bash
-sudo /opt/bin/opkg install expect
-```
-
-Verify:
-
-```bash
-which expect
-```
+The `wd-ssh` wrapper uses `/opt/bin/expect`, while the manual backup wrapper uses `/opt/sbin/screen`.
 
 ### WD NAS
 

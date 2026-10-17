@@ -95,23 +95,47 @@ printf "${GREEN}OK${RESET}\n"
 
 printf "  Waiting for WD services... "
 
-# Resetting wait variable
-elapsed=0
+SSH_START_EPOCH=$(date +%s)
 WAIT_STATUS_LAST=0
+SSH_LAST_ERROR=""
 
-while ! "$WD_SSH" true >/dev/null 2>&1; do
-    sleep "$CHECK_INTERVAL"
-    ((elapsed += CHECK_INTERVAL))
-	wait_status "$elapsed"
+while true; do
+
+	if SSH_OUTPUT=$("$WD_SSH" true 2>&1); then
+		SSH_RC=0
+	else
+		SSH_RC=$?
+	fi
+
+    if (( SSH_RC == 0 )); then
+        break
+    fi
+
+    SSH_LAST_ERROR="$SSH_OUTPUT"
+
+    elapsed=$(( $(date +%s) - SSH_START_EPOCH ))
 
     if (( elapsed >= WD_BOOT_TIMEOUT )); then
         printf "${RED}TIMEOUT${RESET}\n"
-        printf "${RED}ERROR:${RESET} WD is online but SSH did not become available.\n" >&2
+
+        printf '[%s] ERROR: WD SSH unavailable after %d seconds.\n' \
+            "$(date '+%Y-%m-%d %H:%M:%S')" \
+            "$elapsed" >&2
+
+        printf 'Last SSH error:\n%s\n' "$SSH_LAST_ERROR" >&2
         exit 12
     fi
+
+    sleep "$CHECK_INTERVAL"
+
+    elapsed=$(( $(date +%s) - SSH_START_EPOCH ))
+    wait_status "$elapsed"
+
 done
 
-printf "${GREEN}OK${RESET}\n"
+elapsed=$(( $(date +%s) - SSH_START_EPOCH ))
+
+printf "${GREEN}OK${RESET} (%d seconds)\n" "$elapsed"
 
 # }}} End of Wait for SSH
 
